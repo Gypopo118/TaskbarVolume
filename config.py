@@ -19,7 +19,7 @@ import winreg
 
 APP_NAME = "TaskbarVolume"
 APP_TITLE = "Taskbar Volume"
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -29,7 +29,10 @@ DEFAULT_CONFIG = {
     "autohide_edge_px": 5,
     # На сколько логических px поднимать OSD над кнопками панели задач,
     # чтобы системные превью окон не перекрывали капсулу. 0 = вплотную.
+    # Используется, когда anchor_bottom_right выключен.
     "preview_offset_px": 200,
+    # Закрепить OSD в правом нижнем углу активного монитора (над часами/датой).
+    "anchor_bottom_right": True,
     # Зарезервировано: "auto" = таблица 3-4%, int = равномерный шаг.
     "volume_step": "auto",
 }
@@ -120,6 +123,21 @@ def _clamp_int(value, default, minimum, maximum):
     return max(minimum, min(maximum, number))
 
 
+def _as_bool(value, default):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("1", "true", "yes", "on"):
+            return True
+        if normalized in ("0", "false", "no", "off"):
+            return False
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
+
+
 def normalize_config(config):
     result = dict(DEFAULT_CONFIG)
     if isinstance(config, dict):
@@ -128,6 +146,7 @@ def normalize_config(config):
     result["fade_duration_ms"] = _clamp_int(result.get("fade_duration_ms"), 200, 50, 2000)
     result["autohide_edge_px"] = _clamp_int(result.get("autohide_edge_px"), 5, 0, 30)
     result["preview_offset_px"] = _clamp_int(result.get("preview_offset_px"), 200, 0, 600)
+    result["anchor_bottom_right"] = _as_bool(result.get("anchor_bottom_right"), True)
     step = result.get("volume_step", "auto")
     if step != "auto":
         step = _clamp_int(step, 4, 1, 50)

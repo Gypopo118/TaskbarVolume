@@ -34,6 +34,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg["fade_duration_ms"], 200)
         self.assertEqual(cfg["autohide_edge_px"], 5)
         self.assertEqual(cfg["preview_offset_px"], 200)
+        self.assertTrue(cfg["anchor_bottom_right"])
 
     def test_save_and_load_roundtrip(self):
         cfg = dict(config.DEFAULT_CONFIG)
@@ -66,6 +67,24 @@ class ConfigTest(unittest.TestCase):
             handle.write("{not json")
         cfg = config.load_config()
         self.assertEqual(cfg["osd_duration_ms"], 1000)
+
+    def test_anchor_bottom_right_parsing(self):
+        for value, expected in (
+            (False, False),
+            (True, True),
+            ("false", False),
+            ("true", True),
+            (0, False),
+            (1, True),
+        ):
+            with open(self.path, "w", encoding="utf-8") as handle:
+                json.dump({"anchor_bottom_right": value}, handle)
+            self.assertIs(config.load_config()["anchor_bottom_right"], expected, value)
+
+    def test_anchor_bottom_right_defaults_to_true(self):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump({}, handle)
+        self.assertTrue(config.load_config()["anchor_bottom_right"])
 
     def test_autostart_command_quotes_paths(self):
         command = config.autostart_command()

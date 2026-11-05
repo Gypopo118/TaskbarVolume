@@ -39,7 +39,9 @@ import dpi  # noqa: E402
 dpi.enable_dpi_awareness()
 
 from PIL import ImageGrab  # noqa: E402
+import tkinter as tk  # noqa: E402
 
+from osd import OSD  # noqa: E402
 from taskbar_detector import TaskbarDetector  # noqa: E402
 from volume_controller import VolumeController  # noqa: E402
 
@@ -216,6 +218,8 @@ user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
 user32.FindWindowW.restype = wintypes.HWND
 user32.EnumChildWindows.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.LPARAM]
 user32.EnumChildWindows.restype = wintypes.BOOL
+user32.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+user32.GetAncestor.restype = wintypes.HWND
 
 
 def running_taskbar_volume():
@@ -393,6 +397,48 @@ def main(argv=None):
     point = taskbar_empty_point(taskbar)
     print(f"Панель задач: {taskbar.as_tuple()}, точка: {point}", flush=True)
 
+    # Режим по умолчанию: закрепление в правом нижнем углу проверяем отдельным
+    # OSD до запуска приложения, чтобы не зависеть от хука и второго экземпляра.
+    print("", flush=True)
+    print("== Закрепление в правом нижнем углу ==", flush=True)
+    pinned_root = None
+    try:
+        pinned_root = tk.Tk()
+        pinned_root.withdraw()
+        pinned = OSD(
+            pinned_root,
+            {"osd_duration_ms": 3000, "anchor_bottom_right": True},
+            detector=detector,
+        )
+        pinned.show(50, point[0], point[1])
+        pinned_root.update()
+        hwnd = user32.GetAncestor(pinned.window.winfo_id(), 2)
+        rect = RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        scale = dpi.dpi_scale_for_point(point[0], taskbar.top - 1)
+        margin = int(round(8 * scale))
+        monitor = dpi.get_monitor_for_point(*point)
+        expected_right = monitor["rect"].right - margin
+        results.check(
+            "OSD закреплён в правом нижнем углу",
+            abs(rect.right - expected_right) <= 2
+            and abs(rect.bottom - taskbar.top) <= 2,
+            "rect={}, ожидался правый край {}, низ {}".format(
+                (rect.left, rect.top, rect.right, rect.bottom),
+                expected_right,
+                taskbar.top,
+            ),
+        )
+        pinned.hide()
+    except Exception as exc:
+        results.check("OSD закреплён в правом нижнем углу", False, str(exc))
+    finally:
+        if pinned_root is not None:
+            try:
+                pinned_root.destroy()
+            except Exception:
+                pass
+
     process = None
     env = os.environ.copy()
     test_config = os.path.join(args.outdir, "test_config.json")
@@ -406,6 +452,7 @@ def main(argv=None):
                     "fade_duration_ms": 200,
                     "autohide_edge_px": 5,
                     "preview_offset_px": PREVIEW_OFFSET,
+                    "anchor_bottom_right": False,
                 },
                 handle,
             )

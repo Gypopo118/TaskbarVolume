@@ -388,10 +388,15 @@ class OSD:
 
     def _position(self, cursor_x, cursor_y, width, height):
         """
-        Позиция при появлении: OSD приклеен к верхнему краю панели задач.
-        Над кнопками приложений (где Windows показывает всплывающие превью
-        окон) капсула дополнительно поднимается на preview_offset_px, чтобы
-        превью её не перекрывали. Над пустой частью панели и треем - вплотную.
+        Позиция при появлении.
+
+        anchor_bottom_right=True (по умолчанию): OSD закреплён в правом
+        нижнем углу монитора под курсором - правым краем к правому краю
+        экрана, нижним краем к верхнему краю панели задач (над часами/датой).
+
+        anchor_bottom_right=False: OSD по центру курсора; над кнопками
+        приложений поднимается на preview_offset_px, чтобы системные превью
+        окон его не перекрывали.
         """
         monitor = get_monitor_for_point(cursor_x, cursor_y)
         if monitor:
@@ -413,30 +418,40 @@ class OSD:
             except Exception:
                 taskbar = None
 
-        clearance = 0
-        if self.detector is not None:
-            try:
-                if self.detector.is_preview_zone(cursor_x, cursor_y):
-                    offset = max(0, int(self.config.get("preview_offset_px", 200)))
-                    clearance = int(round(offset * scale))
-            except Exception:
-                clearance = 0
-
-        if taskbar is not None:
-            if taskbar.top >= top + monitor_height / 2:
-                # Панель внизу: низ капсулы = верх панели минус зазор под превью.
-                pos_y = int(taskbar.top - height - clearance)
-            elif taskbar.bottom <= top + monitor_height / 2:
-                # Панель сверху (Windows 10): капсула ниже панели и превью.
-                pos_y = int(taskbar.bottom + clearance)
+        anchor_bottom_right = bool(self.config.get("anchor_bottom_right", True))
+        if anchor_bottom_right:
+            # Правый нижний угол активного монитора: над часами/датой.
+            pos_x = int(right - width - margin)
+            if taskbar is not None and taskbar.top >= top + monitor_height / 2:
+                pos_y = int(taskbar.top - height)
             else:
-                # Боковая панель: чуть выше курсора.
-                pos_y = int(cursor_y - height - 16 * scale)
+                # Нет нижней панели (верхняя/боковая/автоскрытие) - низ экрана.
+                pos_y = int(bottom - height)
         else:
-            # Автоскрытая панель: её край - нижняя граница монитора.
-            pos_y = int(bottom - height)
+            clearance = 0
+            if self.detector is not None:
+                try:
+                    if self.detector.is_preview_zone(cursor_x, cursor_y):
+                        offset = max(0, int(self.config.get("preview_offset_px", 200)))
+                        clearance = int(round(offset * scale))
+                except Exception:
+                    clearance = 0
 
-        pos_x = int(cursor_x - width / 2)
+            if taskbar is not None:
+                if taskbar.top >= top + monitor_height / 2:
+                    # Панель внизу: низ капсулы = верх панели минус зазор под превью.
+                    pos_y = int(taskbar.top - height - clearance)
+                elif taskbar.bottom <= top + monitor_height / 2:
+                    # Панель сверху (Windows 10): капсула ниже панели и превью.
+                    pos_y = int(taskbar.bottom + clearance)
+                else:
+                    # Боковая панель: чуть выше курсора.
+                    pos_y = int(cursor_y - height - 16 * scale)
+            else:
+                # Автоскрытая панель: её край - нижняя граница монитора.
+                pos_y = int(bottom - height)
+
+            pos_x = int(cursor_x - width / 2)
 
         min_x = left + margin
         max_x = right - width - margin

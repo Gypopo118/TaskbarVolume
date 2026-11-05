@@ -215,7 +215,7 @@ class SettingsWindow:
         self.preview_offset_var = tk.StringVar(
             value=str(self.config.get("preview_offset_px", 200))
         )
-        tk.Spinbox(
+        self.preview_spin = tk.Spinbox(
             preview_frame,
             from_=0,
             to=600,
@@ -231,10 +231,31 @@ class SettingsWindow:
             highlightbackground=BORDER,
             highlightcolor=ACCENT,
             font=("Segoe UI", 9),
-        ).pack(side="left", ipady=self._sp(2))
+        )
+        self.preview_spin.pack(side="left", ipady=self._sp(2))
         tk.Label(
             preview_frame, text="px", bg=BG, fg=MUTED, font=("Segoe UI", 9)
         ).pack(side="left", padx=(self._sp(6), 0))
+
+        row += 1
+        self.anchor_bottom_right_var = tk.BooleanVar(
+            value=bool(self.config.get("anchor_bottom_right", True))
+        )
+        tk.Checkbutton(
+            grid,
+            text="Закрепить виджет в правом нижнем углу",
+            variable=self.anchor_bottom_right_var,
+            command=self._sync_anchor_state,
+            bg=BG,
+            fg=TEXT,
+            activebackground=BG,
+            activeforeground=TEXT,
+            selectcolor=ENTRY_BG,
+            highlightthickness=0,
+            bd=0,
+            font=("Segoe UI", 9),
+            anchor="w",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(self._sp(10), self._sp(4)))
 
         row += 1
         self.autostart_var = tk.BooleanVar(value=autostart_is_current())
@@ -274,6 +295,16 @@ class SettingsWindow:
         self._button(buttons, "Отмена", self._cancel, primary=False).pack(
             side="right", padx=(0, self._sp(8))
         )
+        self._sync_anchor_state()
+
+    def _sync_anchor_state(self):
+        """Смещение над превью нужно только без закрепления в углу."""
+        try:
+            self.preview_spin.configure(
+                state="disabled" if self.anchor_bottom_right_var.get() else "normal"
+            )
+        except tk.TclError:
+            pass
 
     def _label(self, parent, text, row):
         tk.Label(
@@ -333,6 +364,7 @@ class SettingsWindow:
         new_config["osd_duration_ms"] = duration
         new_config["autohide_edge_px"] = edge
         new_config["preview_offset_px"] = preview_offset
+        new_config["anchor_bottom_right"] = bool(self.anchor_bottom_right_var.get())
         new_config = normalize_config(new_config)
 
         want_autostart = bool(self.autostart_var.get())
