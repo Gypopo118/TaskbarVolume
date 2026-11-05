@@ -209,6 +209,34 @@ class SettingsWindow:
         ).pack(side="left", padx=(self._sp(6), 0))
 
         row += 1
+        self._label(grid, "Смещение над превью", row)
+        preview_frame = tk.Frame(grid, bg=BG)
+        preview_frame.grid(row=row, column=1, sticky="e", pady=self._sp(4))
+        self.preview_offset_var = tk.StringVar(
+            value=str(self.config.get("preview_offset_px", 200))
+        )
+        tk.Spinbox(
+            preview_frame,
+            from_=0,
+            to=600,
+            increment=10,
+            width=6,
+            textvariable=self.preview_offset_var,
+            bg=ENTRY_BG,
+            fg=TEXT,
+            buttonbackground=ENTRY_BG,
+            insertbackground=TEXT,
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=BORDER,
+            highlightcolor=ACCENT,
+            font=("Segoe UI", 9),
+        ).pack(side="left", ipady=self._sp(2))
+        tk.Label(
+            preview_frame, text="px", bg=BG, fg=MUTED, font=("Segoe UI", 9)
+        ).pack(side="left", padx=(self._sp(6), 0))
+
+        row += 1
         self.autostart_var = tk.BooleanVar(value=autostart_is_current())
         tk.Checkbutton(
             grid,
@@ -296,10 +324,15 @@ class SettingsWindow:
             edge = int(float(self.edge_var.get().replace(",", ".")))
         except ValueError:
             edge = self.config.get("autohide_edge_px", 5)
+        try:
+            preview_offset = int(float(self.preview_offset_var.get().replace(",", ".")))
+        except ValueError:
+            preview_offset = self.config.get("preview_offset_px", 200)
 
         new_config = dict(self.config)
         new_config["osd_duration_ms"] = duration
         new_config["autohide_edge_px"] = edge
+        new_config["preview_offset_px"] = preview_offset
         new_config = normalize_config(new_config)
 
         want_autostart = bool(self.autostart_var.get())

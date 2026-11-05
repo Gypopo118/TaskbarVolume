@@ -45,6 +45,8 @@ user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.IsWindowVisible.restype = wintypes.BOOL
 user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetClassNameW.restype = ctypes.c_int
+user32.EnumChildWindows.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.LPARAM]
+user32.EnumChildWindows.restype = wintypes.BOOL
 
 shell32.SHAppBarMessage.argtypes = [wintypes.DWORD, ctypes.c_void_p]
 shell32.SHAppBarMessage.restype = ctypes.c_ssize_t
@@ -66,6 +68,49 @@ def _window_rect(hwnd):
     if user32.GetWindowRect(hwnd, byref(rect)):
         return rect
     return None
+
+
+def _child_rects(hwnd, target_class):
+    """RECT'ы дочерних окон указанного класса (рекурсивно)."""
+    found = []
+
+    def callback(child, lparam):
+        try:
+            buffer = ctypes.create_unicode_buffer(128)
+            user32.GetClassNameW(child, buffer, 128)
+            if buffer.value == target_class:
+                rect = _window_rect(child)
+                if rect and rect.width > 2 and rect.height > 2:
+                    found.append(rect)
+        except Exception:
+            pass
+        return True
+
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(callback)
+    try:
+        user32.EnumChildWindows(hwnd, enum_proc, 0)
+    except Exception:
+        pass
+    return found
+
+
+def _preview_zone_for_taskbar(hwnd, taskbar_rect):
+    """
+    Область панели задач, над которой Windows показывает превью окон:
+    от левого края кнопок приложений (MSTaskSwWClass) до трея
+    (TrayNotifyWnd). Превью появляются только над кнопками.
+    """
+    task_sw = _child_rects(hwnd, "MSTaskSwWClass")
+    tray = _child_rects(hwnd, "TrayNotifyWnd")
+    if not task_sw:
+        return None
+    left = min(rect.left for rect in task_sw)
+    right = min(rect.left for rect in tray) if tray else taskbar_rect.right
+    left = max(left, taskbar_rect.left)
+    right = min(right, taskbar_rect.right)
+    if right <= left + 40:
+        return None
+    return RECT(left, taskbar_rect.top, right, taskbar_rect.bottom)
 
 
 def _enum_taskbar_windows():
@@ -147,6 +192,7 @@ class TaskbarDetector:
         self._zones = []
         self._taskbars = []
         self._monitors = []
+        self._preview_zones = []
         self._updated_at = 0.0
         self._global_autohide = False
 
@@ -196,12 +242,29 @@ class TaskbarDetector:
             self._monitors = monitors
             self._global_autohide = global_autohide
             self._zones = zones
+            self._preview_zones = [
+                zone
+                for zone in (
+                    _preview_zone_for_taskbar(hwnd, rect)
+                    for hwnd, _cls, rect in taskbars
+                )
+                if zone is not None
+            ]
             self._updated_at = now
 
     def is_over_taskbar(self, x, y):
         self.refresh()
         with self._lock:
             for rect in self._zones:
+                if rect.contains(x, y):
+                    return True
+        return False
+
+    def is_preview_zone(self, x, y):
+        """True, если точка над кнопками приложений, где всплывают превью."""
+        self.refresh()
+        with self._lock:
+            for rect in self._preview_zones:
                 if rect.contains(x, y):
                     return True
         return False
@@ -235,6 +298,12 @@ class TaskbarDetector:
         with self._lock:
             return list(self._zones)
 
+    @property
+    def preview_zones(self):
+        self.refresh()
+        with self._lock:
+            return list(self._preview_zones)
+
     def describe(self):
         self.refresh(force=True)
         with self._lock:
@@ -253,6 +322,9 @@ class TaskbarDetector:
             lines.append(f"autohide (global): {self._global_autohide}")
             lines.append(f"zones: {len(self._zones)}")
             for rect in self._zones:
+                lines.append(f"  {rect.as_tuple()}")
+            lines.append(f"preview zones: {len(self._preview_zones)}")
+            for rect in self._preview_zones:
                 lines.append(f"  {rect.as_tuple()}")
             return "\n".join(lines)
 

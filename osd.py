@@ -388,8 +388,10 @@ class OSD:
 
     def _position(self, cursor_x, cursor_y, width, height):
         """
-        Позиция при появлении: OSD приклеен к верхнему краю панели задач
-        (нижним краем капсулы), а не отсчитывается от курсора.
+        Позиция при появлении: OSD приклеен к верхнему краю панели задач.
+        Над кнопками приложений (где Windows показывает всплывающие превью
+        окон) капсула дополнительно поднимается на preview_offset_px, чтобы
+        превью её не перекрывали. Над пустой частью панели и треем - вплотную.
         """
         monitor = get_monitor_for_point(cursor_x, cursor_y)
         if monitor:
@@ -411,13 +413,22 @@ class OSD:
             except Exception:
                 taskbar = None
 
+        clearance = 0
+        if self.detector is not None:
+            try:
+                if self.detector.is_preview_zone(cursor_x, cursor_y):
+                    offset = max(0, int(self.config.get("preview_offset_px", 200)))
+                    clearance = int(round(offset * scale))
+            except Exception:
+                clearance = 0
+
         if taskbar is not None:
             if taskbar.top >= top + monitor_height / 2:
-                # Панель внизу: нижний край капсулы = верхний край панели.
-                pos_y = int(taskbar.top - height)
+                # Панель внизу: низ капсулы = верх панели минус зазор под превью.
+                pos_y = int(taskbar.top - height - clearance)
             elif taskbar.bottom <= top + monitor_height / 2:
-                # Панель сверху (Windows 10): капсула сразу под панелью.
-                pos_y = int(taskbar.bottom)
+                # Панель сверху (Windows 10): капсула ниже панели и превью.
+                pos_y = int(taskbar.bottom + clearance)
             else:
                 # Боковая панель: чуть выше курсора.
                 pos_y = int(cursor_y - height - 16 * scale)
@@ -434,8 +445,8 @@ class OSD:
         else:
             pos_x = left
 
-        # По вертикали не оставляем отступ: OSD должен примыкать к панели.
-        min_y = top
+        # По вертикали не оставляем отступ от панели, но не выходим за монитор.
+        min_y = top + margin
         max_y = bottom - height
         if max_y >= min_y:
             pos_y = max(min_y, min(pos_y, max_y))

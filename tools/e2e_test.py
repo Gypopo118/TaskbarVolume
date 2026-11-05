@@ -32,6 +32,8 @@ from ctypes import wintypes
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+PREVIEW_OFFSET = 200
+
 import dpi  # noqa: E402
 
 dpi.enable_dpi_awareness()
@@ -216,6 +218,20 @@ user32.EnumChildWindows.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.LPA
 user32.EnumChildWindows.restype = wintypes.BOOL
 
 
+def running_taskbar_volume():
+    """True, если уже запущен TaskbarVolume.exe (чужой экземпляр)."""
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq TaskbarVolume.exe", "/NH", "/FO", "CSV"],
+            capture_output=True,
+            timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return b"TaskbarVolume.exe" in (result.stdout or b"")
+    except Exception:
+        return False
+
+
 def find_osd_rect():
     """RECT видимого OSD-окна Tk (верхний Toplevel приложения)."""
     found = []
@@ -243,13 +259,13 @@ def find_osd_rect():
     return found[0] if found else None
 
 
-def capture_osd(cursor_x, taskbar_top, out_path):
-    """Скриншот области OSD (капсула приклеена к верхнему краю панели задач)."""
+def capture_osd(cursor_x, taskbar_top, out_path, clearance_px=0):
+    """Скриншот области OSD (капсула над зоной превью или вплотную к панели)."""
     scale = dpi.dpi_scale_for_point(cursor_x, max(0, taskbar_top - 1))
     width = int(round(200 * scale))
     height = int(round(70 * scale))
     px = cursor_x - width // 2
-    py = taskbar_top - height
+    py = taskbar_top - height - int(round(clearance_px * scale))
 
     image = ImageGrab.grab()
     screen_w, screen_h = primary_screen_size()
@@ -353,6 +369,14 @@ def main(argv=None):
             print(f"Не найден {exe}, тестирую исходники", flush=True)
             exe = None
 
+    if not args.no_launch and running_taskbar_volume():
+        print(
+            "Уже запущен TaskbarVolume.exe. Закройте его через трей → Выход "
+            "и повторите тест.",
+            flush=True,
+        )
+        return 2
+
     volume = VolumeController()
     original_volume = volume.get_volume()
     original_mute = volume.get_mute()
@@ -381,6 +405,7 @@ def main(argv=None):
                     "osd_duration_ms": 5000,
                     "fade_duration_ms": 200,
                     "autohide_edge_px": 5,
+                    "preview_offset_px": PREVIEW_OFFSET,
                 },
                 handle,
             )
@@ -418,7 +443,11 @@ def main(argv=None):
         results.check("колесо вверх: 50% -> 53%", got == 53, f"получено {got}%")
 
         crop_path = os.path.join(args.outdir, "osd_after_wheel.png")
-        crop, green = capture_osd(point[0], taskbar.top, crop_path)
+        scale = dpi.dpi_scale_for_point(point[0], max(0, taskbar.top - 1))
+        expected_bottom = taskbar.top - int(round(PREVIEW_OFFSET * scale))
+        crop, green = capture_osd(
+            point[0], taskbar.top, crop_path, clearance_px=PREVIEW_OFFSET
+        )
         results.check(
             "OSD с зелёной полоской виден",
             green > 300,
@@ -427,10 +456,13 @@ def main(argv=None):
 
         osd_rect = find_osd_rect()
         results.check(
-            "OSD приклеен к верхнему краю панели задач",
-            osd_rect is not None and abs(osd_rect.bottom - taskbar.top) <= 2,
-            "низ OSD={}, верх панели={}".format(
-                osd_rect.bottom if osd_rect else "?", taskbar.top
+            "OSD поднят над зоной превью",
+            osd_rect is not None and abs(osd_rect.bottom - expected_bottom) <= 2,
+            "низ OSD={}, ожидался {} (верх панели {} минус {} px)".format(
+                osd_rect.bottom if osd_rect else "?",
+                expected_bottom,
+                taskbar.top,
+                PREVIEW_OFFSET,
             ),
         )
         first_pos = (osd_rect.left, osd_rect.top) if osd_rect else None

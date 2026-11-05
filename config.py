@@ -19,7 +19,7 @@ import winreg
 
 APP_NAME = "TaskbarVolume"
 APP_TITLE = "Taskbar Volume"
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -27,6 +27,9 @@ DEFAULT_CONFIG = {
     "osd_duration_ms": 1000,
     "fade_duration_ms": 200,
     "autohide_edge_px": 5,
+    # На сколько логических px поднимать OSD над кнопками панели задач,
+    # чтобы системные превью окон не перекрывали капсулу. 0 = вплотную.
+    "preview_offset_px": 200,
     # Зарезервировано: "auto" = таблица 3-4%, int = равномерный шаг.
     "volume_step": "auto",
 }
@@ -124,6 +127,7 @@ def normalize_config(config):
     result["osd_duration_ms"] = _clamp_int(result.get("osd_duration_ms"), 1000, 100, 10000)
     result["fade_duration_ms"] = _clamp_int(result.get("fade_duration_ms"), 200, 50, 2000)
     result["autohide_edge_px"] = _clamp_int(result.get("autohide_edge_px"), 5, 0, 30)
+    result["preview_offset_px"] = _clamp_int(result.get("preview_offset_px"), 200, 0, 600)
     step = result.get("volume_step", "auto")
     if step != "auto":
         step = _clamp_int(step, 4, 1, 50)
