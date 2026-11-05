@@ -33,7 +33,6 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg["osd_duration_ms"], 1000)
         self.assertEqual(cfg["fade_duration_ms"], 200)
         self.assertEqual(cfg["autohide_edge_px"], 5)
-        self.assertEqual(cfg["preview_offset_px"], 200)
         self.assertTrue(cfg["anchor_bottom_right"])
 
     def test_save_and_load_roundtrip(self):
@@ -52,7 +51,6 @@ class ConfigTest(unittest.TestCase):
                     "osd_duration_ms": 999999,
                     "fade_duration_ms": -10,
                     "autohide_edge_px": 1000,
-                    "preview_offset_px": 1000,
                 },
                 handle,
             )
@@ -60,7 +58,6 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg["osd_duration_ms"], 10000)
         self.assertEqual(cfg["fade_duration_ms"], 50)
         self.assertEqual(cfg["autohide_edge_px"], 30)
-        self.assertEqual(cfg["preview_offset_px"], 600)
 
     def test_broken_json_falls_back_to_defaults(self):
         with open(self.path, "w", encoding="utf-8") as handle:

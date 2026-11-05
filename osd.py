@@ -1,5 +1,5 @@
 """
-OSD-виджет: капсула с уровнем громкости над курсором.
+OSD-виджет: капсула с уровнем громкости у панели задач.
 
 Виджет живёт в главном Tk-потоке и не создаёт собственный mainloop:
 раньше OSD запускал Tk в фоновом потоке, и вызовы из хука мыши
@@ -15,7 +15,7 @@ import time
 import tkinter as tk
 from ctypes import wintypes
 
-from dpi import dpi_scale_for_point, get_monitor_for_point
+from dpi import RECT, dpi_scale_for_point, get_monitor_for_point
 
 TRANSPARENT_COLOR = "#010101"
 
@@ -55,6 +55,89 @@ user32.SetWindowPos.argtypes = [
     wintypes.UINT,
 ]
 user32.SetWindowPos.restype = wintypes.BOOL
+
+
+def taskbar_edge(monitor_rect, taskbar_rect):
+    """
+    К какой стороне монитора примыкает панель задач:
+    'bottom', 'top', 'left', 'right' или None.
+    """
+    if taskbar_rect is None:
+        return None
+    monitor_width = max(1, monitor_rect.right - monitor_rect.left)
+    monitor_height = max(1, monitor_rect.bottom - monitor_rect.top)
+    center_x = (taskbar_rect.left + taskbar_rect.right) / 2.0
+    center_y = (taskbar_rect.top + taskbar_rect.bottom) / 2.0
+    if taskbar_rect.height >= monitor_height * 0.5:
+        # Вертикальная панель слева или справа.
+        return "left" if center_x < monitor_rect.left + monitor_width / 2.0 else "right"
+    return "bottom" if center_y >= monitor_rect.top + monitor_height / 2.0 else "top"
+
+
+def compute_position(
+    cursor_x,
+    cursor_y,
+    width,
+    height,
+    monitor_rect,
+    taskbar_rect,
+    scale=1.0,
+    anchor_bottom_right=True,
+):
+    """
+    Позиция OSD относительно панели задач.
+
+    Капсула всегда примыкает к внутренней кромке панели:
+      * панель снизу  - низ капсулы на верхнем крае панели;
+      * панель сверху - верх капсулы на нижнем крае панели;
+      * панель слева  - левый край капсулы на правом крае панели;
+      * панель справа - правый край капсулы на левом крае панели.
+
+    anchor_bottom_right=True: прижать к правому нижнему углу рабочей
+    области (для нижней панели - над часами; для верхней - справа под ней;
+    для боковой - внизу рядом с ней).
+    anchor_bottom_right=False: центрировать вдоль панели по курсору.
+    """
+    left, top, right, bottom = (
+        monitor_rect.left,
+        monitor_rect.top,
+        monitor_rect.right,
+        monitor_rect.bottom,
+    )
+    margin = int(round(8 * scale))
+    edge = taskbar_edge(monitor_rect, taskbar_rect)
+
+    if edge == "bottom":
+        pos_y = int(taskbar_rect.top - height)
+        pos_x = int(right - width - margin) if anchor_bottom_right else int(cursor_x - width / 2.0)
+    elif edge == "top":
+        pos_y = int(taskbar_rect.bottom)
+        pos_x = int(right - width - margin) if anchor_bottom_right else int(cursor_x - width / 2.0)
+    elif edge == "left":
+        pos_x = int(taskbar_rect.right)
+        pos_y = int(bottom - height - margin) if anchor_bottom_right else int(cursor_y - height / 2.0)
+    elif edge == "right":
+        pos_x = int(taskbar_rect.left - width)
+        pos_y = int(bottom - height - margin) if anchor_bottom_right else int(cursor_y - height / 2.0)
+    else:
+        # Панель не найдена (например, автоскрытие) - низ экрана.
+        pos_x = int(right - width - margin) if anchor_bottom_right else int(cursor_x - width / 2.0)
+        pos_y = int(bottom - height)
+
+    min_x = left + margin
+    max_x = right - width - margin
+    if max_x >= min_x:
+        pos_x = max(min_x, min(pos_x, max_x))
+    else:
+        pos_x = left
+
+    min_y = top
+    max_y = bottom - height
+    if max_y >= min_y:
+        pos_y = max(min_y, min(pos_y, max_y))
+    else:
+        pos_y = top
+    return int(pos_x), int(pos_y)
 
 
 class OSD:
@@ -387,29 +470,14 @@ class OSD:
         )
 
     def _position(self, cursor_x, cursor_y, width, height):
-        """
-        Позиция при появлении.
-
-        anchor_bottom_right=True (по умолчанию): OSD закреплён в правом
-        нижнем углу монитора под курсором - правым краем к правому краю
-        экрана, нижним краем к верхнему краю панели задач (над часами/датой).
-
-        anchor_bottom_right=False: OSD по центру курсора; над кнопками
-        приложений поднимается на preview_offset_px, чтобы системные превью
-        окон его не перекрывали.
-        """
+        """Позиция у панели задач (см. compute_position)."""
         monitor = get_monitor_for_point(cursor_x, cursor_y)
         if monitor:
-            rect = monitor["rect"]
-            left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+            monitor_rect = monitor["rect"]
         else:
-            left, top = 0, 0
-            right = self.root.winfo_screenwidth()
-            bottom = self.root.winfo_screenheight()
-
-        scale = max(1.0, getattr(self, "scale", 1.0))
-        margin = int(round(8 * scale))
-        monitor_height = max(1, bottom - top)
+            monitor_rect = RECT(
+                0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+            )
 
         taskbar = None
         if self.detector is not None:
@@ -418,56 +486,18 @@ class OSD:
             except Exception:
                 taskbar = None
 
+        scale = max(1.0, getattr(self, "scale", 1.0))
         anchor_bottom_right = bool(self.config.get("anchor_bottom_right", True))
-        if anchor_bottom_right:
-            # Правый нижний угол активного монитора: над часами/датой.
-            pos_x = int(right - width - margin)
-            if taskbar is not None and taskbar.top >= top + monitor_height / 2:
-                pos_y = int(taskbar.top - height)
-            else:
-                # Нет нижней панели (верхняя/боковая/автоскрытие) - низ экрана.
-                pos_y = int(bottom - height)
-        else:
-            clearance = 0
-            if self.detector is not None:
-                try:
-                    if self.detector.is_preview_zone(cursor_x, cursor_y):
-                        offset = max(0, int(self.config.get("preview_offset_px", 200)))
-                        clearance = int(round(offset * scale))
-                except Exception:
-                    clearance = 0
-
-            if taskbar is not None:
-                if taskbar.top >= top + monitor_height / 2:
-                    # Панель внизу: низ капсулы = верх панели минус зазор под превью.
-                    pos_y = int(taskbar.top - height - clearance)
-                elif taskbar.bottom <= top + monitor_height / 2:
-                    # Панель сверху (Windows 10): капсула ниже панели и превью.
-                    pos_y = int(taskbar.bottom + clearance)
-                else:
-                    # Боковая панель: чуть выше курсора.
-                    pos_y = int(cursor_y - height - 16 * scale)
-            else:
-                # Автоскрытая панель: её край - нижняя граница монитора.
-                pos_y = int(bottom - height)
-
-            pos_x = int(cursor_x - width / 2)
-
-        min_x = left + margin
-        max_x = right - width - margin
-        if max_x >= min_x:
-            pos_x = max(min_x, min(pos_x, max_x))
-        else:
-            pos_x = left
-
-        # По вертикали не оставляем отступ от панели, но не выходим за монитор.
-        min_y = top + margin
-        max_y = bottom - height
-        if max_y >= min_y:
-            pos_y = max(min_y, min(pos_y, max_y))
-        else:
-            pos_y = top
-        return pos_x, pos_y
+        return compute_position(
+            cursor_x,
+            cursor_y,
+            width,
+            height,
+            monitor_rect,
+            taskbar,
+            scale,
+            anchor_bottom_right,
+        )
 
 
 _instance = None
